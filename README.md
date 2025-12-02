@@ -1,7 +1,7 @@
 # TEKS LESSON CREATOR
 
 ## Setup
-1. Clone directory, ´npm install´, ´npm run dev´
+1. Clone directory, `npm install`, `npm run dev`
 2. Generate a TEKS lesson JSON by following the instructions below in Google AI Studio
 3. Paste it into the program, hover over codes to see definitions
 
