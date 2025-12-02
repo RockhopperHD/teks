@@ -1,0 +1,112 @@
+{
+  "type": "object",
+  "description": "Unit or week plan schema.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Title for the unit or week plan."
+    },
+    "description": {
+      "type": "string",
+      "description": "A comprehensive description of the lesson or unit."
+    },
+    "subject": {
+      "type": "string",
+      "description": "The subject of the lesson/unit."
+    },
+    "overarching_goals_standards": {
+      "type": "array",
+      "description": "A list of relevant TEKS ID standards (e.g., '112.2.b.4') that apply to the unit's overarching goals.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "activities": {
+      "type": "array",
+      "description": "A list of 1 to 5 activities or lessons for the plan.",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the specific activity."
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "Timeframe for the lesson (e.g., 'one class period', '120 minutes')."
+          },
+          "student_will_statement": {
+            "type": "string",
+            "description": "A statement starting with 'Students will...' describing what they will learn and do."
+          },
+          "assignment_description": {
+            "type": "string",
+            "description": "A paragraph describing the assignment details."
+          },
+          "evaluation_criteria": {
+            "type": "object",
+            "description": "Rubric for grading the assignment.",
+            "properties": {
+              "score_4_proficient": {
+                "type": "string",
+                "description": "Criteria for 'Proficient'. What qualifies a student to achieve this rating."
+              },
+              "score_3_developing": {
+                "type": "string",
+                "description": "Criteria for 'Developing'. What qualifies a student to achieve this rating."
+              },
+              "score_2_beginning": {
+                "type": "string",
+                "description": "Criteria for 'Beginning to develop'. What qualifies a student to achieve this rating."
+              },
+              "score_1_not_yet": {
+                "type": "string",
+                "description": "Criteria for 'Not Yet'. What qualifies a student to achieve this rating."
+              },
+              "score_0_no_participation": {
+                "type": "string",
+                "description": "Criteria for 'Doesn't Participate'. e.g., 'Student submits blank work'."
+              }
+            },
+            "required": [
+              "score_4_proficient",
+              "score_3_developing",
+              "score_2_beginning",
+              "score_1_not_yet",
+              "score_0_no_participation"
+            ]
+          },
+          "activity_standards": {
+            "type": "array",
+            "description": "A list of relevant TEKS ID standards (e.g., '112.2.b.4') specific to this activity.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "timeframe",
+          "student_will_statement",
+          "assignment_description",
+          "evaluation_criteria",
+          "activity_standards"
+        ]
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Any additional notes regarding the plan."
+    }
+  },
+  "required": [
+    "title",
+    "description",
+    "subject",
+    "overarching_goals_standards",
+    "activities",
+    "notes"
+  ]
+}
