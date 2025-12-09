@@ -24,12 +24,12 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, index, standardsD
               {activity.timeframe}
             </div>
           </div>
-          
+
           <div className="flex flex-wrap gap-2 justify-start md:justify-end max-w-xs">
             {activity.activity_standards.map(id => (
-              <StandardPill 
-                key={id} 
-                standardId={id} 
+              <StandardPill
+                key={id}
+                standardId={id}
                 definition={standardsDb[id]}
               />
             ))}
@@ -50,6 +50,22 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, index, standardsD
           <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">Assignment Description</h4>
           <p className="text-slate-600 leading-relaxed text-base">{activity.assignment_description}</p>
         </div>
+
+        {activity.ainara_activities && activity.ainara_activities.length > 0 && (
+          <div className="mb-8 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+            <h4 className="text-sm font-bold text-indigo-800 uppercase tracking-wide mb-3 flex items-center">
+              <span className="mr-2">✨</span> Suggested AINARA Activities
+            </h4>
+            <div className="space-y-3">
+              {activity.ainara_activities.map((ainara, idx) => (
+                <div key={idx} className="bg-white p-3 rounded border border-indigo-100 shadow-sm">
+                  <h5 className="font-semibold text-indigo-900 text-sm mb-1">{ainara.title}</h5>
+                  <p className="text-slate-600 text-sm">{ainara.rationale}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">Evaluation Criteria</h4>

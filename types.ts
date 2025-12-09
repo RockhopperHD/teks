@@ -6,6 +6,11 @@ export interface Rubric {
   score_0_no_participation: string;
 }
 
+export interface AinaraActivity {
+  title: string;
+  rationale: string;
+}
+
 export interface Activity {
   title: string;
   timeframe: string;
@@ -13,6 +18,7 @@ export interface Activity {
   assignment_description: string;
   evaluation_criteria: Rubric;
   activity_standards: string[];
+  ainara_activities?: AinaraActivity[];
 }
 
 export interface LessonPlan {
@@ -28,4 +34,5 @@ export interface StandardDefinition {
   id: string;
   description: string;
   category?: string;
+  isFolder?: boolean;
 }

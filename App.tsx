@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LessonPlan, StandardDefinition } from './types';
-import LessonPlanView from './components/LessonPlanView';
-import { parseCSV } from './services/teksData';
+import { LessonPlan, StandardDefinition, Activity } from './types';
+import ActivityBlock from './components/ActivityBlock';
+import StandardPill from './components/StandardPill';
+import { parseTSV } from './services/teksData';
+import { generateLessonPlan, generateActivity } from './services/gemini';
 
 const INITIAL_JSON_STRING = `{
   "title": "Exploring Our Cosmic Neighborhood: A 3-Day Solar System Unit",
@@ -29,239 +31,346 @@ const INITIAL_JSON_STRING = `{
         "112.48.c.7.C",
         "112.48.c.2.A"
       ]
-    },
-    {
-      "title": "Planetary Comparative Analysis",
-      "timeframe": "One class period (45-60 minutes)",
-      "student_will_statement": "Students will compare and contrast the planets in terms of orbit, size, composition, rotation, atmosphere, natural satellites, magnetic fields, and geological activity.",
-      "assignment_description": "Students will be assigned a specific planetary group (Terrestrial or Jovian) or specific pairs of planets to research. They must create a 'Planetary Data Sheet' or infographic that compares their assigned planets against Earth. The analysis must include data on composition, atmosphere, magnetic fields, and geological activity. Finally, students will write a summary paragraph explaining how distance from the Sun influences the physical properties of the planets (e.g., temperature, state of matter, atmosphere retention).",
-      "evaluation_criteria": {
-        "score_4_proficient": "The data sheet is comprehensive, visually organized, and accurate. The summary paragraph clearly articulates the relationship between solar distance and planetary properties with specific evidence.",
-        "score_3_developing": "The data sheet contains most required information but may miss details on magnetic fields or geological activity. The summary explains the relationship generally but lacks specific evidence.",
-        "score_2_beginning": "The data sheet is incomplete or contains factual errors. The summary fails to connect the physical properties to the distance from the Sun.",
-        "score_1_not_yet": "The assignment is fragmentary with minimal data. No summary is provided.",
-        "score_0_no_participation": "Student submits blank work."
-      },
-      "activity_standards": [
-        "112.48.c.11.C"
-      ]
-    },
-    {
-      "title": "Small Bodies, Big Significance",
-      "timeframe": "One class period (45-60 minutes)",
-      "student_will_statement": "Students will explore and communicate the origins and significance of planets, planetary rings, satellites, asteroids, comets, Oort cloud, and Kuiper belt objects.",
-      "assignment_description": "Students will conduct a 'jigsaw' research activity where different groups investigate specific non-planetary bodies: Asteroids, Comets, Kuiper Belt Objects, and the Oort Cloud. Groups will create a 3-minute presentation or a digital poster explaining what these objects are made of, where they are located, and what they tell us about the formation of the solar system. The class will conclude with a discussion on the difference between these objects and major planets.",
-      "evaluation_criteria": {
-        "score_4_proficient": "Presentation includes accurate, detailed information on composition, location, and origin significance. Student demonstrates strong understanding of how these bodies relate to solar system formation.",
-        "score_3_developing": "Presentation includes basic information on composition and location but may miss the significance regarding solar system formation.",
-        "score_2_beginning": "Presentation is vague, missing key definitions (e.g., confusing comets and asteroids) or location data.",
-        "score_1_not_yet": "Presentation is significantly incomplete or incorrect.",
-        "score_0_no_participation": "Student refuses to present or submit work."
-      },
-      "activity_standards": [
-        "112.48.c.11.B"
-      ]
     }
   ],
   "notes": "This lesson is designed for an Astronomy or Earth and Space Science course but can be adapted for Physics by emphasizing gravitational calculations in Day 1 and 2. Access to a long hallway or outdoor track is recommended for Day 1."
 }`;
 
-// Explicit mapping for common subject names to known CSV filenames
-const SUBJECT_FILE_MAP: Record<string, string> = {
-  "english language arts": "english",
-  "english": "english",
-  "ela": "english",
-  "math": "mathematics",
-  "mathematics": "mathematics",
-  "science": "science",
-  "social studies": "social-studies",
-  "fine arts": "fine-arts",
-  "health": "health-education",
-  "health education": "health-education",
-  "pe": "physical-education",
-  "physical education": "physical-education",
-  "tech apps": "technology-applications",
-  "technology applications": "technology-applications",
-  "lote": "languages-other-than-english",
-  "languages other than english": "languages-other-than-english",
-  "career": "career",
-  "cte": "career",
-  "career and technical education": "career"
+const SUBJECT_OPTIONS = [
+  "Science",
+  "Math",
+  "ELA",
+  "SLA"
+];
+
+const SUBJECT_PREFIX_MAP: Record<string, string> = {
+  "Science": "S",
+  "Math": "MATH",
+  "ELA": "ELA",
+  "SLA": "SLA"
 };
 
-const getCsvFilename = (subject: string): string => {
-  const normalized = subject.toLowerCase().trim();
-  
-  // 1. Check explicit map
-  if (SUBJECT_FILE_MAP[normalized]) {
-    return SUBJECT_FILE_MAP[normalized];
-  }
-
-  // 2. Fallback: dashes for spaces
-  return normalized.replace(/\s+/g, '-');
-};
+const TSV_FILE_PATH = 'csvs/compressed - Copy of combined_master.tsv';
 
 const App: React.FC = () => {
-  const [jsonInput, setJsonInput] = useState(INITIAL_JSON_STRING);
-  const [lessonPlan, setLessonPlan] = useState<LessonPlan | null>(null);
+  const [lessonPlan, setLessonPlan] = useState<LessonPlan | null>(() => JSON.parse(INITIAL_JSON_STRING));
   const [standardsDb, setStandardsDb] = useState<Record<string, StandardDefinition>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
 
-  // Load standards when a lesson plan is successfully parsed
+  // Sidebar Inputs
+  const [subject, setSubject] = useState<string>('Science');
+  const [topic, setTopic] = useState<string>('');
+  const [numDays, setNumDays] = useState<number>(3);
+
+  // Load ALL standards from TSV on mount (or when needed)
   useEffect(() => {
-    if (lessonPlan) {
-      setLoading(true);
-      
-      const filename = getCsvFilename(lessonPlan.subject);
-      const path = `CSVs/${filename}.csv`;
-      
-      console.log(`Attempting to fetch standards from: ${path}`);
+    fetch(TSV_FILE_PATH)
+      .then(res => {
+        if (!res.ok) throw new Error("Could not load standards TSV file");
+        return res.text();
+      })
+      .then(text => {
+        const parsed = parseTSV(text);
+        setStandardsDb(parsed);
+      })
+      .catch(err => {
+        console.error("Failed to load TSV:", err);
+        setStandardsDb({});
+      });
+  }, []);
 
-      fetch(path)
-        .then(res => {
-           if(!res.ok) {
-             console.warn(`Failed to fetch ${path}, trying generic teks.csv or failing gracefully.`);
-             // Fallback generic or simple failure
-             return fetch('CSVs/teks.csv');
-           }
-           return res;
-        })
-        .then(res => {
-          if (!res.ok) throw new Error(`Could not load standards CSV file for subject: ${lessonPlan.subject}`);
-          return res.text();
-        })
-        .then(text => {
-          const parsed = parseCSV(text);
-          setStandardsDb(parsed);
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error("Failed to load CSV:", err);
-          // Don't crash, just show empty DB (which will result in red pills)
-          setStandardsDb({});
-          setLoading(false);
-        });
-    }
-  }, [lessonPlan]);
-
-  const handleVisualize = () => {
+  const fetchFilteredStandards = async (subj: string) => {
     try {
-      setError(null);
-      const parsed = JSON.parse(jsonInput);
-      
-      // Basic schema check
-      if (!parsed.title || !parsed.activities || !parsed.subject) {
-        throw new Error("Invalid JSON: Missing required fields (title, activities, subject)");
-      }
+      const res = await fetch(TSV_FILE_PATH);
+      if (!res.ok) throw new Error("Could not load standards TSV");
+      const text = await res.text();
 
+      const prefix = SUBJECT_PREFIX_MAP[subj];
+      if (!prefix) return "";
+
+      // Filter lines that start with the prefix
+      const lines = text.split('\n');
+      const filteredLines = lines.filter(line => line.startsWith(prefix));
+
+      return filteredLines.join('\n');
+    } catch (err) {
+      console.warn("Failed to load TSV for generation.", err);
+      return "";
+    }
+  };
+
+  const handleGenerateFullPlan = async () => {
+    if (!topic.trim()) {
+      setError("Please enter a topic.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const csvContent = await fetchFilteredStandards(subject);
+      const generatedJson = await generateLessonPlan(subject, topic, csvContent, numDays);
+      const parsed = JSON.parse(generatedJson);
       setLessonPlan(parsed);
     } catch (e: any) {
-      setError(e.message || "Invalid JSON format");
+      console.error("Generation failed:", e);
+      setError(e.message || "Failed to generate lesson plan.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleBack = () => {
-    setLessonPlan(null);
-    setStandardsDb({});
+  const handleGenerateSingleActivity = async () => {
+    if (!topic.trim()) {
+      setError("Please enter a topic to generate an activity.");
+      return;
+    }
+    if (!lessonPlan) {
+      setError("Please generate or create a lesson plan first.");
+      return;
+    }
+
+    setActivityLoading(true);
     setError(null);
+
+    try {
+      const csvContent = await fetchFilteredStandards(subject);
+      const generatedJson = await generateActivity(subject, topic, csvContent);
+      const newActivity = JSON.parse(generatedJson);
+
+      setLessonPlan(prev => prev ? {
+        ...prev,
+        activities: [...prev.activities, newActivity]
+      } : null);
+
+    } catch (e: any) {
+      console.error("Activity generation failed:", e);
+      setError(e.message || "Failed to generate activity.");
+    } finally {
+      setActivityLoading(false);
+    }
   };
 
-  if (lessonPlan) {
-    if (loading) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="flex flex-col items-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
-            <p className="text-slate-500 font-medium">Loading TEKS Standards for {lessonPlan.subject}...</p>
-            <p className="text-xs text-slate-400 mt-2">Looking for CSVs/{getCsvFilename(lessonPlan.subject)}.csv</p>
-          </div>
-        </div>
-      );
+  const handleAddBlankActivity = () => {
+    if (!lessonPlan) return;
+    const blankActivity: Activity = {
+      title: "New Activity",
+      timeframe: "45 minutes",
+      student_will_statement: "Students will...",
+      assignment_description: "Description...",
+      activity_standards: [],
+      evaluation_criteria: {
+        score_4_proficient: "",
+        score_3_developing: "",
+        score_2_beginning: "",
+        score_1_not_yet: "",
+        score_0_no_participation: ""
+      }
+    };
+    setLessonPlan({
+      ...lessonPlan,
+      activities: [...lessonPlan.activities, blankActivity]
+    });
+  };
+
+  const handleUpdateActivity = (index: number, updatedActivity: Activity) => {
+    if (!lessonPlan) return;
+    const newActivities = [...lessonPlan.activities];
+    newActivities[index] = updatedActivity;
+    setLessonPlan({ ...lessonPlan, activities: newActivities });
+  };
+
+  const handleMoveActivity = (index: number, direction: 'up' | 'down') => {
+    if (!lessonPlan) return;
+    const newActivities = [...lessonPlan.activities];
+    if (direction === 'up' && index > 0) {
+      [newActivities[index], newActivities[index - 1]] = [newActivities[index - 1], newActivities[index]];
+    } else if (direction === 'down' && index < newActivities.length - 1) {
+      [newActivities[index], newActivities[index + 1]] = [newActivities[index + 1], newActivities[index]];
     }
-    return (
-      <div className="min-h-screen bg-slate-50">
-        <LessonPlanView 
-          plan={lessonPlan} 
-          standardsDb={standardsDb}
-          onBack={handleBack}
-        />
-      </div>
-    );
-  }
+    setLessonPlan({ ...lessonPlan, activities: newActivities });
+  };
+
+  const handleDeleteActivity = (index: number) => {
+    if (!lessonPlan) return;
+    const newActivities = lessonPlan.activities.filter((_, i) => i !== index);
+    setLessonPlan({ ...lessonPlan, activities: newActivities });
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900">
-          TEKS Lesson Planner
-        </h2>
-        <p className="mt-2 text-center text-sm text-slate-600">
-          Paste your lesson plan JSON below to visualize it.
-        </p>
-      </div>
+    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-900">
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-3xl">
-        <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
-          <div className="space-y-6">
+      {/* LEFT SIDEBAR - CONTROLS */}
+      <aside className="w-96 bg-white border-r border-slate-200 flex flex-col shadow-xl z-10">
+        <div className="p-6 border-b border-slate-100">
+          <h1 className="text-xl font-extrabold text-slate-800 tracking-tight">TEKS Planner <span className="text-primary">Builder</span></h1>
+          <p className="text-xs text-slate-400 mt-1">AI-Powered Lesson Construction</p>
+        </div>
+
+        <div className="p-6 flex-1 overflow-y-auto space-y-8">
+
+          {/* Context Section */}
+          <section className="space-y-4">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Lesson Context</h2>
+
             <div>
-              <label htmlFor="json-input" className="block text-sm font-medium text-slate-700">
-                Lesson Plan JSON
-              </label>
-              <div className="mt-1">
-                <textarea
-                  id="json-input"
-                  name="json-input"
-                  rows={20}
-                  className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm font-mono text-xs"
-                  value={jsonInput}
-                  onChange={(e) => setJsonInput(e.target.value)}
-                />
-              </div>
+              <label htmlFor="subject" className="block text-sm font-medium text-slate-700 mb-1">Subject</label>
+              <select
+                id="subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="block w-full pl-3 pr-10 py-2 text-sm border-slate-300 focus:ring-primary focus:border-primary rounded-md"
+              >
+                {SUBJECT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </div>
 
-            {error && (
-              <div className="rounded-md bg-red-50 p-4">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-red-800">
-                      Error parsing JSON
-                    </h3>
-                    <div className="mt-2 text-sm text-red-700">
-                      <p>{error}</p>
-                    </div>
+            <div>
+              <label htmlFor="topic" className="block text-sm font-medium text-slate-700 mb-1">Topic</label>
+              <input
+                type="text"
+                id="topic"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. Solar System"
+                className="block w-full px-3 py-2 border-slate-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="numDays" className="block text-sm font-medium text-slate-700 mb-1">Sessions / Days</label>
+              <input
+                type="number"
+                id="numDays"
+                min="1"
+                max="10"
+                value={numDays}
+                onChange={(e) => setNumDays(parseInt(e.target.value))}
+                className="block w-full px-3 py-2 border-slate-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-sm"
+              />
+            </div>
+          </section>
+
+          <hr className="border-slate-100" />
+
+          {/* Actions Section */}
+          <section className="space-y-3">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</h2>
+
+            <button
+              onClick={handleGenerateFullPlan}
+              disabled={loading}
+              className={`w-full flex items-center justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-primary hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+            >
+              {loading ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  Generating Plan...
+                </>
+              ) : (
+                <>
+                  <span className="mr-2">✨</span> Generate Full Plan
+                </>
+              )}
+            </button>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleGenerateSingleActivity}
+                disabled={activityLoading || !lessonPlan}
+                className={`flex items-center justify-center py-2 px-3 border border-slate-200 rounded-lg shadow-sm text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all ${activityLoading || !lessonPlan ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {activityLoading ? '...' : '+ AI Activity'}
+              </button>
+              <button
+                onClick={handleAddBlankActivity}
+                disabled={!lessonPlan}
+                className={`flex items-center justify-center py-2 px-3 border border-slate-200 rounded-lg shadow-sm text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all ${!lessonPlan ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                + Blank Activity
+              </button>
+            </div>
+          </section>
+
+          {error && (
+            <div className="rounded-md bg-red-50 p-3 border border-red-100">
+              <div className="flex">
+                <div className="ml-1">
+                  <h3 className="text-xs font-medium text-red-800">Error</h3>
+                  <div className="mt-1 text-xs text-red-700">
+                    <p>{error}</p>
                   </div>
                 </div>
               </div>
-            )}
-
-            <div>
-              <button
-                type="button"
-                onClick={handleVisualize}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors"
-              >
-                Visualize Lesson Plan
-              </button>
             </div>
-            
-            <div className="text-center">
-                <button 
-                  type="button"
-                  onClick={() => setJsonInput(INITIAL_JSON_STRING)}
-                  className="text-sm text-slate-500 hover:text-primary underline"
-                >
-                    Reset to Example
-                </button>
+          )}
+        </div>
+
+        <div className="p-4 bg-slate-50 border-t border-slate-200 text-center">
+          <p className="text-[10px] text-slate-400">Powered by Google Gemini</p>
+        </div>
+      </aside>
+
+      {/* RIGHT MAIN CONTENT - PREVIEW/BUILDER */}
+      <main className="flex-1 overflow-y-auto p-8 md:p-12 scroll-smooth">
+        {lessonPlan ? (
+          <div className="max-w-4xl mx-auto">
+            {/* Header Section (Editable? For now just display) */}
+            <header className="mb-12 border-b border-slate-200 pb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="px-3 py-1 rounded-full bg-teal-100 text-teal-800 font-bold text-xs tracking-wide uppercase">
+                  {lessonPlan.subject}
+                </span>
+              </div>
+
+              <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-4 leading-tight">
+                {lessonPlan.title}
+              </h1>
+
+              <p className="text-lg text-slate-600 leading-relaxed mb-6">
+                {lessonPlan.description}
+              </p>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                {lessonPlan.overarching_goals_standards.map(id => (
+                  <StandardPill key={id} standardId={id} definition={standardsDb[id]} />
+                ))}
+              </div>
+            </header>
+
+            {/* Activities List */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-slate-800">Activities ({lessonPlan.activities.length})</h2>
+              </div>
+
+              {lessonPlan.activities.map((activity, index) => (
+                <ActivityBlock
+                  key={index}
+                  index={index}
+                  activity={activity}
+                  totalActivities={lessonPlan.activities.length}
+                  standardsDb={standardsDb}
+                  onUpdate={(updated) => handleUpdateActivity(index, updated)}
+                  onMoveUp={() => handleMoveActivity(index, 'up')}
+                  onMoveDown={() => handleMoveActivity(index, 'down')}
+                  onDelete={() => handleDeleteActivity(index)}
+                />
+              ))}
             </div>
           </div>
-        </div>
-      </div>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+            <svg className="w-16 h-16 mb-4 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+            <p className="text-lg font-medium">Start by generating a lesson plan on the left.</p>
+          </div>
+        )}
+      </main>
     </div>
   );
 };
